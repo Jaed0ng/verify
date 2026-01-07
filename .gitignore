@@ -1,1 +1,4 @@
 spike/riscv-isa-sim/
+*.swp
+.*.swp
+*.swo
