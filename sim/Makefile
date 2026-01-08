@@ -1,8 +1,9 @@
+SHELL= /bin/bash
 #---------------------------------------
 # 项目基础配置
 #---------------------------------------
 PRJ_NAME      = xiangshan_uvm
-TB_TOP        ?= xs_top          # UVM测试平台顶层
+TB_TOP        ?= tb_top          # UVM测试平台顶层
 OUT           = out              # 输出目录根路径
 SEED          = 1                # 仿真种子
 GUI           ?= 0               # 是否启用GUI（0/1）
@@ -11,23 +12,25 @@ VERBOSITY     = UVM_LOW          # UVM日志级别
 TEST          ?= xs_base_test    # 默认测试用例
 SIM_DIR       = $(OUT)/sim/$(TEST)_$(SEED)  # 仿真工作目录
 MAX_INSTR     ?= 1000000         # 最大指令数限制
-
+DUMP_FSDB
 #---------------------------------------
 # 工具链配置
 #---------------------------------------
 VCS           ?= vcs
 VERDI_HOME    ?= $(shell echo $VERDI_HOME)
-SPIKE_HOME    ?= ../spike  # Spike安装路径
+SPIKE_HOME    ?= ../spike/riscv-isa-sim  # Spike安装路径
 RISCV_GCC     ?= riscv64-unknown-elf-gcc # RISC-V编译器
 MAKEFLAGS     += -j$(shell nproc)        # 并行编译
-
+LOG_DIR       = $(OUT)/log        # 编译/仿真日志目录
+OBJ_DIR       = $(OUT)/obj        # 仿真器二进制目录
+COV_DIR       = $(OUT)/cov        # 覆盖率数据目录
 #---------------------------------------
 # 路径配置（根据实际项目结构调整）
 #---------------------------------------
 XIANGSHAN_HOME ?= $(shell cd .. && pwd)  # 香山项目根目录
-RTL_DIR        = $(XIANGSHAN_HOME)/build/rtl  # 生成的Verilog目录
+RTL_DIR        = ../rtl  # 生成的Verilog目录
 UVM_ENV_DIR    = ../env              # UVM环境目录（用户自定义）
-SPIKE_DPI_DIR  = ../dpi      # Spike DPI接口目录
+SPIKE_DPI_DIR  = ../spike      # Spike DPI接口目录
 TEST_PROGS_DIR = $(XIANGSHAN_HOME)/ready-to-run  # 测试程序目录
 
 #---------------------------------------
@@ -38,6 +41,7 @@ DEFINES = +define+SPIKE_DPI \
           +define+UVM_1_2 \
           +define+MAX_INSTR=$(MAX_INSTR) \
           +define+DEBUG=$(GUI)
+          +define+DUMP_FSDB
 
 # VCS编译选项
 VCS_COMP_OPTS = -sverilog -full64 -kdb -debug_access+all \
@@ -45,8 +49,10 @@ VCS_COMP_OPTS = -sverilog -full64 -kdb -debug_access+all \
                 +incdir+$(UVM_ENV_DIR)/{env,seq,tests,tb} \
                 +incdir+$(RTL_DIR) \
                 -l $(OUT)/log/compile.log
+                -debug \
+                +fsdb+autoflush 
 
-# VCS链接选项（包含Spike DPI）
+# VCS链接选项
 VCS_ELAB_OPTS = -full64 -top $(TB_TOP) \
                 -o $(OUT)/obj/$(TB_TOP).simv \
                 -LDFLAGS "-Wl,--no-as-needed" \
@@ -57,9 +63,11 @@ VCS_ELAB_OPTS = -full64 -top $(TB_TOP) \
                 $(VERDI_HOME)/share/PLI/VCS/linux64/pli.a
 
 # Spike DPI编译配置
-SPIKE_DPI_CFLAGS = -I$(SPIKE_HOME)/include \
-                   -I$(SPIKE_DPI_DIR) \
-                   -fPIC -shared
+SPIKE_DPI_CFLAGS =  -I$(SPIKE_HOME)/riscv \
+					-I$(SPIKE_HOME)/fesvr \
+					-I$(SPIKE_HOME)/fesvr \
+					-I$(SPIKE_DPI_DIR) \
+                    -fPIC -shared -02
 SPIKE_DPI_LIBS = $(SPIKE_DPI_DIR)/spike_dpi.so \
                  -L$(SPIKE_HOME)/lib -lriscv -lfesvr -lsoftfloat
 
@@ -80,7 +88,7 @@ RTL_FILES = $(shell cat $(RTL_DIR)/filelist.f)
 UVM_FILES = $(wildcard $(UVM_ENV_DIR)/env/*.sv) \
             $(wildcard $(UVM_ENV_DIR)/seq/*.sv) \
             $(wildcard $(UVM_ENV_DIR)/tests/*.sv) \
-			$(UVM_ENV_DIR)/tb/xs_top_if.sv
+			$(UVM_ENV_DIR)/tb/xs_top_if.sv \
             $(UVM_ENV_DIR)/tb/$(TB_TOP).sv
 
 #---------------------------------------
@@ -92,20 +100,25 @@ UVM_FILES = $(wildcard $(UVM_ENV_DIR)/env/*.sv) \
 all: run
 
 # 创建输出目录
-$(shell mkdir -p $(OUT)/{log,obj,sim} $(SIM_DIR))
 
 # 编译Spike DPI接口
 $(SPIKE_DPI_DIR)/spike_dpi.so: $(SPIKE_DPI_DIR)/spike_dpi.c
-	$(CC) $(SPIKE_DPI_CFLAGS) $< -o $@ -L$(SPIKE_HOME)/lib -lriscv -lfesvr
+	$(CC) $(SPIKE_DPI_CFLAGS) $< -o $@ -L$(SPIKE_HOME)/lib -lriscv -lfesvr -lsoftfloat
+
+# 创建必要文件夹
+prepare:
+	mkdir -p $(OUT)/$(LOG_DIR) $(OBJ_DIR) $(COV_DIR) $(SPIKE_DPI_DIR)
+
 
 # 编译RTL和UVM环境
-compile: $(SPIKE_DPI_DIR)/spike_dpi.so
+compile: prepare 
+	$(SPIKE_DPI_DIR)/spike_dpi.so
 	$(VCS) $(VCS_COMP_OPTS) $(DEFINES) \
 		$(RTL_FILES) $(UVM_FILES)
 
 #  elaboration（生成仿真器）
 elab: compile
-	$(VCS) $(VCS_ELAB_OPTS)
+	$(VCS) $(VCS_ELAB_OPTS) $(RTL_FILES) $(UVM_FILES)
 
 # 运行仿真
 run: elab

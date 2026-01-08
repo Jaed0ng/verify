@@ -149,6 +149,34 @@ extern "C" void spike_write_mem(uint64_t addr, int size, uint64_t value) {
     }
 }
 
+// 获取当前PC值
+extern "C" uint64_t spike_get_pc() {
+    if (spike_core == nullptr) {
+        fprintf(stderr, "Spike not initialized\n");
+        return 0;
+    }
+    return spike_core->get_pc();
+}
+
+// 获取指定地址的指令
+extern "C" uint32_t spike_get_instr(uint64_t addr) {
+    if (spike_sim == nullptr) {
+        fprintf(stderr, "Spike not initialized\n");
+        return 0;
+    }
+    // 从内存读取32位指令（假设指令对齐）
+    return (uint32_t)spike_sim->debug_read_mem(addr, 4);
+}
+
+// 获取CSR寄存器值（以mstatus为例）
+extern "C" uint64_t spike_get_csr_mstatus() {
+    if (spike_core == nullptr) {
+        fprintf(stderr, "Spike not initialized\n");
+        return 0;
+    }
+    return spike_core->get_csr(CSR_MSTATUS); // 需要确保CSR_MSTATUS宏定义有效
+}
+
 // 关闭Spike模拟器
 extern "C" void spike_close() {
     if (spike_sim != nullptr) {
@@ -168,5 +196,8 @@ extern "C" {
     DPI_FUNCTION uint64_t spike_read_mem(uint64_t addr, int size);
     DPI_FUNCTION void spike_write_mem(uint64_t addr, int size, uint64_t value);
     DPI_FUNCTION void spike_close();
+    DPI_FUNCTION uint64_t spike_get_pc();
+    DPI_FUNCTION uint32_t spike_get_instr(uint64_t addr);
+    DPI_FUNCTION uint64_t spike_get_csr_mstatus();    
 }
 
